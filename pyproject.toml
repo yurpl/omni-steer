@@ -1,31 +1,43 @@
 [project]
-name = "omni-steer"
-version = "0.1.0"
-description = "Representation engineering for Qwen3-Omni on multimodal emotion datasets"
-authors = [{ name = "John Murzaku" }]
+name = "qwen-omni-rep-eng"
+version = "0.2.0"
+description = "Representation engineering (find/detect/steer) for Qwen3-Omni on multimodal emotion datasets (MELD)"
+authors = [{ name = "AI Assistant" }]
 readme = "README.md"
 requires-python = ">=3.10"
 
-[dependencies]
-torch = "^2.4.1"
-transformers = "^4.45.2"  # Qwen3-Omni support
-transformer-lens = "^2.7.0"  # Hooks/patching (compatible via custom wrappers)
-sae-lens = "^3.21.0"  # SAE training
-datasets = "^3.0.1"  # MELD/IEMOCAP
-scikit-learn = "^1.5.2"  # Probes
-gradio = "^4.44.1"  # UI
-numpy = "^2.1.1"
-scipy = "^1.14.1"
-pandas = "^2.2.3"
-matplotlib = "^3.9.2"
-einops = "^0.8.0"
-fancy-einsum = "^0.0.3"
-librosa = "^0.10.2"  # Audio
-moviepy = "^1.0.3"  # Video
-soundfile = "^0.12.1"  # Audio output
+dependencies = [
+  "torch>=2.3.0",
+  # Qwen3-Omni is in Transformers >=4.57.0; if your pip is older, install Transformers from source (see README)
+  "transformers>=4.57.0",
+  "accelerate>=0.34.0",
+  "safetensors>=0.4.5",
+  "datasets>=3.0.1",
+  "scikit-learn>=1.5.2",
+  "gradio>=4.44.1",
+  "numpy>=1.26,<2",
+  "scipy>=1.14.1",
+  "pandas>=2.2.3",
+  "matplotlib>=3.9.2",
+  "einops>=0.8.0",
+  "fancy-einsum>=0.0.3",
+  "librosa>=0.10.2",
+  "soundfile>=0.12.1",
+  "moviepy>=1.0.3",
+  "torchvision>=0.15.0",
+]
 
-# Optional for regeneration (UV add or git install)
-# styletts2 @ git+https://github.com/yl4579/StyleTTS2.git
-# sadtalker @ git+https://github.com/OpenTalker/SadTalker.git
-# wav2lip @ git+https://github.com/Rudrabha/Wav2Lip.git
-# emo @ git+https://github.com/CrazyH37/EMO.git
+[project.optional-dependencies]
+interp = [
+  # TransformerLens for examples & parity with docs; >=2.16 has stable patching helpers
+  "transformer-lens>=2.16.0",
+  # SAELens: train/probe SAE features; API changes across major versions, handled in wrapper
+  "sae-lens>=3.0.0",
+]
+av = [
+  # Optional: helpful for video/audio IO robustness
+  "av>=12.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
