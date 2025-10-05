@@ -25,6 +25,8 @@ dependencies = [
   "soundfile>=0.12.1",
   "moviepy>=1.0.3",
   "torchvision>=0.15.0",
+  "joblib>=1.4.2",
+  "flash-attn>=2.0.0",
 ]
 
 [project.optional-dependencies]

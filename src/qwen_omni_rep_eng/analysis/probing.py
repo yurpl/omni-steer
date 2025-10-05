@@ -30,3 +30,21 @@ def extract_token_feature(hidden_states: List[torch.Tensor],
     H = hidden_states[layer]  # [B, T, d]
     h = H[0, pos, :].detach().cpu().float().numpy()
     return h
+
+from typing import Optional, Tuple
+import numpy as np
+
+def proba_margin_joy_sad(clf, x: np.ndarray, joy_idx: int, sad_idx: int) -> float:
+    """Return p(joy) - p(sadness) from a fitted sklearn LogisticRegression."""
+    proba = clf.predict_proba(x[None, :])[0]  # [n_classes]
+    return float(proba[joy_idx] - proba[sad_idx])
+
+def batch_features_from_texts(runner, texts, layer: int, pos: int = -1) -> np.ndarray:
+    """Utility to grab [N, d] features from Thinker hidden states for a list of texts."""
+    feats = []
+    for txt in texts:
+        conv = runner.convo_from_text(txt)
+        inputs = runner.make_inputs(conv, use_audio_in_video=False)
+        hs, _ = runner.thinker_hidden_states(inputs)
+        feats.append(hs[layer][0, pos, :].detach().cpu().numpy())
+    return np.stack(feats, axis=0)

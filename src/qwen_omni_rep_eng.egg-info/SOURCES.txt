@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 src/qwen_omni_rep_eng/__init__.py
+src/qwen_omni_rep_eng/constants.py
 src/qwen_omni_rep_eng/ui.py
 src/qwen_omni_rep_eng.egg-info/PKG-INFO
 src/qwen_omni_rep_eng.egg-info/SOURCES.txt
@@ -13,6 +14,10 @@ src/qwen_omni_rep_eng/analysis/probing.py
 src/qwen_omni_rep_eng/analysis/sae.py
 src/qwen_omni_rep_eng/data/__init__.py
 src/qwen_omni_rep_eng/data/meld.py
+src/qwen_omni_rep_eng/metrics/__init__.py
+src/qwen_omni_rep_eng/metrics/audio.py
+src/qwen_omni_rep_eng/metrics/plotting.py
+src/qwen_omni_rep_eng/metrics/text.py
 src/qwen_omni_rep_eng/models/__init__.py
 src/qwen_omni_rep_eng/models/omni.py
 src/qwen_omni_rep_eng/steering/__init__.py

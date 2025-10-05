@@ -22,6 +22,8 @@ Requires-Dist: librosa>=0.10.2
 Requires-Dist: soundfile>=0.12.1
 Requires-Dist: moviepy>=1.0.3
 Requires-Dist: torchvision>=0.15.0
+Requires-Dist: joblib>=1.4.2
+Requires-Dist: flash-attn>=2.0.0
 Provides-Extra: interp
 Requires-Dist: transformer-lens>=2.16.0; extra == "interp"
 Requires-Dist: sae-lens>=3.0.0; extra == "interp"

@@ -38,3 +38,13 @@ def register_sae_feature_steer(layer_module: torch.nn.Module,
         out[:, span, :] = steered
         return out
     return layer_module.register_forward_hook(_hook)
+
+def delta_norm(x: torch.Tensor) -> torch.Tensor:
+    return torch.linalg.norm(x)
+
+def random_delta_like(delta_ref: torch.Tensor, seed: int = 0) -> torch.Tensor:
+    """Return a random vector with the SAME norm as delta_ref (control baseline)."""
+    g = torch.Generator(device=delta_ref.device).manual_seed(seed)
+    rnd = torch.randn_like(delta_ref, generator=g)
+    rnd = rnd / (torch.linalg.norm(rnd) + 1e-8) * (torch.linalg.norm(delta_ref) + 1e-8)
+    return rnd
