@@ -1,2 +1,4 @@
 MELD.Raw/
-
+*.egg-info/
+*.pt
+__pycache__/

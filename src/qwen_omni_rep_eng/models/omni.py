@@ -179,8 +179,10 @@ class OmniRunner:
         """
         Joint generation: returns (text_ids, audio_waveform)
         """
+        # Filter inputs to only include tensors for generation
+        gen_inputs = {k: v for k, v in inputs.items() if isinstance(v, torch.Tensor)}
         text_ids, audio = self.model.generate(
-            **inputs,
+            **gen_inputs,
             use_audio_in_video=True,
             thinker_do_sample=thinker_do_sample,
             talker_do_sample=talker_do_sample,
