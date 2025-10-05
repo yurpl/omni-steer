@@ -28,7 +28,8 @@ omni-steer/
 │   └── ui.py                  # Gradio UI for interactive demos
 ├── scripts/
 │   ├── run_probe.py           # Layer sweep to find emotion localization
-│   └── steer_demo.py          # End-to-end steering demo on video
+│   ├── steer_demo.py          # End-to-end steering demo on video
+│   └── exp_meld_baselines.py  # Baseline steering experiments with metrics
 ├── MELD.Raw/                  # MELD dataset (download separately)
 └── pyproject.toml             # Dependencies
 ```
@@ -83,12 +84,30 @@ We use the HuggingFace datasets library to load labels/text, and read videos dir
 ### 2) Run probe localization
 
 ```bash
-python scripts/run_probe.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --split train --layer_sweep 16 32 --limit 50
+python scripts/run_probe.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --split train --layer_sweep 16 32 --limit 400 --out_probe outputs/meld_probe.joblib --out_meta outputs/meld_probe_meta.json
 ```
 
-This sweeps across layers [16, 32) and trains a linear probe to detect emotions. Output shows macro-F1 per layer.
+This sweeps across layers [16, 32) and trains a linear probe to detect emotions. Output shows weighted-F1 per layer and saves the best probe for baseline experiments.
 
-### 3) Steer a test clip
+### 3) Run baseline steering experiments
+
+```bash
+python scripts/exp_meld_baselines.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --probe outputs/meld_probe.joblib --meta outputs/meld_probe_meta.json --n 30 --alpha_grid 0.0 0.5 1.0 1.5 2.0
+```
+
+This runs comprehensive baseline experiments comparing:
+- **null**: No steering (baseline)
+- **prompt_cheerful**: Prompt-only control
+- **delta_random**: Random delta control
+- **delta_early**: Early-layer steering
+- **delta_bestlayer**: Best-layer steering (main baseline)
+
+Generates metrics (affect gain, content preservation, prosody changes) and 3 plots:
+- `outputs/alpha_sweep_joysad.png` - Alpha sweep curve
+- `outputs/method_bars_f0_and_content.png` - Method comparison
+- `outputs/scatter_drift_vs_gain.png` - Content vs affect trade-off
+
+### 4) Steer a test clip (demo)
 
 ```bash
 python scripts/steer_demo.py --video MELD.Raw/output_repeated_splits_test/dia263_utt3.mp4 --alpha 1.0
@@ -100,7 +119,7 @@ This:
 - Steers the model by adding `alpha * delta` to layer 24 activations
 - Generates cheerful text + audio, saved to `steered.wav`
 
-### 4) UI (POC)
+### 5) UI (POC)
 
 ```bash
 python src/qwen_omni_rep_eng/ui.py
@@ -110,12 +129,11 @@ python src/qwen_omni_rep_eng/ui.py
 
 ## What you get
 
-* Localization heatmaps (layer × token span) identifying where affect lives.
-* Detectors: per-layer logistic probes; optional SAE features & dashboards.
-* Steering:
-
-  * Thinker Δ‑vector or SAE‑feature edits → text/internal affect.
-  * Talker prosody nudge near code predictor → happy speech (pitch/energy/timing).
+* **Localization**: Layer sweep identifies where affect features live in the Thinker
+* **Detectors**: Per-layer logistic probes with weighted-F1 scores; optional SAE features
+* **Steering**: Multiple baseline methods with comprehensive evaluation
+* **Metrics**: Affect gain (joy-sadness probe margin), content preservation (token overlap F1), prosody changes (F0 shift)
+* **Visualization**: Automatic generation of publication-ready plots comparing methods
 
 ---
 
