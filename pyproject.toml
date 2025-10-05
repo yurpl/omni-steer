@@ -1,0 +1,31 @@
+[project]
+name = "omni-steer"
+version = "0.1.0"
+description = "Representation engineering for Qwen3-Omni on multimodal emotion datasets"
+authors = [{ name = "John Murzaku" }]
+readme = "README.md"
+requires-python = ">=3.10"
+
+[dependencies]
+torch = "^2.4.1"
+transformers = "^4.45.2"  # Qwen3-Omni support
+transformer-lens = "^2.7.0"  # Hooks/patching (compatible via custom wrappers)
+sae-lens = "^3.21.0"  # SAE training
+datasets = "^3.0.1"  # MELD/IEMOCAP
+scikit-learn = "^1.5.2"  # Probes
+gradio = "^4.44.1"  # UI
+numpy = "^2.1.1"
+scipy = "^1.14.1"
+pandas = "^2.2.3"
+matplotlib = "^3.9.2"
+einops = "^0.8.0"
+fancy-einsum = "^0.0.3"
+librosa = "^0.10.2"  # Audio
+moviepy = "^1.0.3"  # Video
+soundfile = "^0.12.1"  # Audio output
+
+# Optional for regeneration (UV add or git install)
+# styletts2 @ git+https://github.com/yl4579/StyleTTS2.git
+# sadtalker @ git+https://github.com/OpenTalker/SadTalker.git
+# wav2lip @ git+https://github.com/Rudrabha/Wav2Lip.git
+# emo @ git+https://github.com/CrazyH37/EMO.git
