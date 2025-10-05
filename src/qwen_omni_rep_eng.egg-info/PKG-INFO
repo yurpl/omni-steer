@@ -41,14 +41,42 @@ MELD provides aligned text, audio, video with 7 emotion labels.
 
 ---
 
+## Project Structure
+
+```
+omni-steer/
+├── src/qwen_omni_rep_eng/
+│   ├── models/omni.py         # OmniRunner wrapper for Qwen3-Omni
+│   ├── data/meld.py           # MELD dataset loader
+│   ├── analysis/
+│   │   ├── probing.py         # Linear probes for emotion detection
+│   │   ├── patching.py        # TransformerLens-style activation patching
+│   │   └── sae.py             # Sparse autoencoder utilities
+│   ├── steering/
+│   │   ├── thinker.py         # Thinker layer delta-vector steering
+│   │   └── talker.py          # Talker prosody modification
+│   └── ui.py                  # Gradio UI for interactive demos
+├── scripts/
+│   ├── run_probe.py           # Layer sweep to find emotion localization
+│   └── steer_demo.py          # End-to-end steering demo on video
+├── MELD.Raw/                  # MELD dataset (download separately)
+└── pyproject.toml             # Dependencies
+```
+
+---
+
 ## Quickstart
 
 ### 0) Environment
+Make sure you have uv installed.
 ```bash
-# Recommended: uv or venv
-pip install -U pip
-pip install uv
-uv sync
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Next, install the dependencies.
+```bash
+# Install dependencies
+uv pip install -e .
 ```
 
 > If transformers>=4.57.0 is not available in your env and you see missing classes like
@@ -62,33 +90,45 @@ uv sync
 
 ### 1) Data: MELD
 
-Download raw AV:
+Download the MELD dataset:
 
-* Official bundle: MELD.Raw.tar.gz (see repo README). Unpack to assets/MELD.Raw/.
+```bash
+wget https://huggingface.co/datasets/declare-lab/MELD/resolve/main/MELD.Raw.tar.gz
+tar -xzf MELD.Raw.tar.gz
+```
 
-We'll also use Hugging Face's declare-lab/MELD for text/labels (robust splits).
-
-Directory (after extract):
+This extracts the dataset into `MELD.Raw/` with the following structure:
 
 ```
-assets/MELD.Raw/
-  train_split/
-  dev_splits_complete/
-  output_repeated_splits_test/
-  test_split/               # sometimes present depending on bundle version
+MELD.Raw/
+├── train_splits/              # Training video clips
+├── output_repeated_splits_test/  # Test video clips
+├── train_sent_emo.csv         # Training labels & metadata
+├── dev_sent_emo.csv           # Development labels & metadata
+└── test_sent_emo.csv          # Test labels & metadata
 ```
+
+We use the HuggingFace datasets library to load labels/text, and read videos directly from MELD.Raw/.
 
 ### 2) Run probe localization
 
 ```bash
-python scripts/run_probe.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --split train --layer_sweep 12 36
+python scripts/run_probe.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --split train --layer_sweep 16 32 --limit 50
 ```
+
+This sweeps across layers [16, 32) and trains a linear probe to detect emotions. Output shows macro-F1 per layer.
 
 ### 3) Steer a test clip
 
 ```bash
-python scripts/steer_demo.py --video assets/MELD.Raw/test_split/dia0_utt2.mp4 --alpha 1.2
+python scripts/steer_demo.py --video MELD.Raw/output_repeated_splits_test/dia263_utt3.mp4 --alpha 1.0
 ```
+
+This:
+- Extracts happy/sad features from a small training sample
+- Computes a delta vector (happy - sad)
+- Steers the model by adding `alpha * delta` to layer 24 activations
+- Generates cheerful text + audio, saved to `steered.wav`
 
 ### 4) UI (POC)
 

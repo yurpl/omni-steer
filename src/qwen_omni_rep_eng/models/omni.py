@@ -34,13 +34,13 @@ class OmniRunner:
         self.processor = Qwen3OmniMoeProcessor.from_pretrained(model_name)
         if thinker_only:
             self.model = Qwen3OmniMoeThinkerForConditionalGeneration.from_pretrained(
-                model_name, dtype=dtype, device_map=device_map
+                model_name, dtype=dtype, device_map=device_map, attn_implementation="flash_attention_2"
             ).eval()
             self.thinker = self.model
             self.talker = None
         else:
             self.model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
-                model_name, dtype=dtype, device_map=device_map, enable_audio_output=enable_audio_output
+                model_name, dtype=dtype, device_map=device_map, enable_audio_output=enable_audio_output, attn_implementation="flash_attention_2"
             ).eval()
             # The combined model exposes thinker/talker submodules:
             self.thinker = getattr(self.model, "thinker", None)

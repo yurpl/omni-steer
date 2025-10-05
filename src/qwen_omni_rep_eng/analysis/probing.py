@@ -19,7 +19,7 @@ def build_per_layer_probe(features: List[np.ndarray],
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=None)
     clf.fit(X_train, y_train)
     preds = clf.predict(X_test)
-    return clf, f1_score(y_test, preds, average="macro")
+    return clf, f1_score(y_test, preds, average="weighted")
 
 def extract_token_feature(hidden_states: List[torch.Tensor],
                           layer: int, pos: int = -1) -> np.ndarray:
