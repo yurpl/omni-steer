@@ -41,7 +41,7 @@ omni-steer/
 
 ```bash
 # Install dependencies
-vf-install
+pip install -e .
 ```
 
 > If transformers>=4.57.0 is not available in your env and you see missing classes like
