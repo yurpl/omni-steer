@@ -38,10 +38,15 @@ omni-steer/
 ## Quickstart
 
 ### 0) Environment
+Make sure you have uv installed.
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
+Next, install the dependencies.
 ```bash
 # Install dependencies
-pip install -e .
+uv pip install -e .
 ```
 
 > If transformers>=4.57.0 is not available in your env and you see missing classes like
