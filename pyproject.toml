@@ -27,6 +27,8 @@ dependencies = [
   "torchvision>=0.15.0",
   "joblib>=1.4.2",
   "flash-attn>=2.0.0",
+  "av>=12.3.0",
+  "torchcodec>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -35,10 +37,6 @@ interp = [
   "transformer-lens>=2.16.0",
   # SAELens: train/probe SAE features; API changes across major versions, handled in wrapper
   "sae-lens>=3.0.0",
-]
-av = [
-  # Optional: helpful for video/audio IO robustness
-  "av>=12.3.0",
 ]
 
 [tool.setuptools.packages.find]

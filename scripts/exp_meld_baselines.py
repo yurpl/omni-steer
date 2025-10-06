@@ -18,56 +18,134 @@ def _compute_delta_from_train(runner, n=200, layer=24):
     for ex in tr:
         if ex.emotion.lower() not in ("joy","sadness"): continue
         hs, _ = runner.thinker_hidden_states(runner.make_inputs(runner.convo_from_text(ex.utterance), use_audio_in_video=False))
-        feat = hs[layer][0, -1, :].detach().cpu().numpy()
+        feat = hs[layer][0, -1, :].detach().cpu().float().numpy()
         (happy if ex.emotion.lower()=="joy" else sad).append(feat)
     if len(happy) < 5 or len(sad) < 5:
         print("[warn] small happy/sad sample; delta may be weak.")
     return make_delta(happy, sad).to(runner.device), len(happy), len(sad)
 
-def _affect_gain(runner, clf, layer, text_before, text_after) -> float:
-    # Use Thinker features for the *generated* text only (proxy); if you prefer,
-    # you can run features on the original transcript too and subtract.
-    # Here: margin(after) - margin(before), where 'before' is with alpha=0 (null).
-    def _margin(t): 
-        hs,_ = runner.thinker_hidden_states(runner.make_inputs(runner.convo_from_text(t), use_audio_in_video=False))
-        x = hs[layer][0,-1,:].detach().cpu().numpy()
-        return proba_margin_joy_sad(clf, x, JOY, SAD)
-    return _margin(text_after) - _margin(text_before)
+def _affect_gain_same_text(runner, clf, layer, ref_text, method, delta, alpha):
+    """Margin(after) - margin(base) on the SAME text, with correct class indexing."""
+    conv_text = runner.convo_from_text(ref_text)
+    inputs_text = runner.make_inputs(conv_text, use_audio_in_video=False)
 
-def _gen_with_method(runner, video_path, method, layer, delta, alpha, seed=0):
-    """Returns (text, audio_np)."""
-    conv = runner.convo_from_video(video_path, prompt="Repeat the original speech content using the same words. Then speak it in a cheerful tone.")
+    def _margin():
+        hs, _ = runner.thinker_hidden_states(inputs_text)
+        x = hs[layer][0, -1, :].detach().cpu().numpy()
+        proba = clf.predict_proba(x[None, :])[0]
+        # Map to indices in clf.classes_ (which are int labels 0..6 from training)
+        classes = list(clf.classes_)
+        joy_idx = classes.index(JOY)
+        sad_idx = classes.index(SAD)
+        return float(proba[joy_idx] - proba[sad_idx])
+
+    base = _margin()
+    if method not in ("delta_bestlayer", "delta_early", "delta_random"):
+        return 0.0
+
+    # Register steering and recompute margin
+    layers = runner._iter_thinker_layers()
+    span = slice(0, inputs_text["input_ids"].shape[1])
+    handle = None
+    try:
+        if method == "delta_bestlayer":
+            handle = register_delta_steer(layers[layer], delta.to(runner.device), span, alpha=alpha)
+        elif method == "delta_early":
+            early = max(4, layer // 4)
+            handle = register_delta_steer(layers[early], delta.to(runner.device), span, alpha=alpha)
+        elif method == "delta_random":
+            rnd = random_delta_like(delta.to(runner.device), seed=0)
+            handle = register_delta_steer(layers[layer], rnd, span, alpha=alpha)
+        return _margin() - base
+    finally:
+        if handle is not None:
+            handle.remove()
+
+def _gen_with_method(runner, video_path, ref_text, method, layer, delta, alpha, seed=0, dialogue_id=None, utterance_id=None):
+    """Returns (text, audio_np) while forcing the model to say exactly ref_text."""
+
+    # Use sentinel tags + strict instruction
+    sys_rules = (
+        "You are a voice playback module.\n"
+        "Rules:\n"
+        "1) Output only the text BETWEEN <say> and </say>.\n"
+        "2) Do not add or remove any words or punctuation.\n"
+        "3) Respond in English only.\n"
+    )
+    neutral_prompt  = "Speak exactly the following text. Output only the text between the tags."
+    cheerful_prompt = neutral_prompt + " Say it in a cheerful tone."
+
+    prompt = cheerful_prompt if method == "prompt_cheerful" else neutral_prompt
+    tagged = f"<say>{ref_text}</say>"
+
+    # Build conversation with a system rule + the MELD video + the tagged transcript
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": sys_rules}]},
+        {"role": "user", "content": [
+            {"type": "video", "video": video_path},
+            {"type": "text",  "text": prompt},
+            {"type": "text",  "text": tagged}
+        ]}
+    ]
+
     inputs = runner.make_inputs(conv, use_audio_in_video=True)
 
+    # Steering hook (Thinker)
     layers = runner._iter_thinker_layers()
     span = slice(0, inputs["input_ids"].shape[1])
-
     handle = None
-    if method == "null":
-        pass
-    elif method == "prompt_cheerful":
-        # No hook; prompt carries the control signal
-        pass
-    elif method == "delta_bestlayer":
+    if method == "delta_bestlayer":
         handle = register_delta_steer(layers[layer], delta, span, alpha=alpha)
     elif method == "delta_early":
-        early = max(4, layer//4)
+        early = max(4, layer // 4)
         handle = register_delta_steer(layers[early], delta, span, alpha=alpha)
     elif method == "delta_random":
         rnd = random_delta_like(delta, seed=seed)
         handle = register_delta_steer(layers[layer], rnd, span, alpha=alpha)
-    else:
-        raise ValueError(method)
 
     try:
+        # Keep responses bounded and deterministic
         text_ids, audio = runner.generate_any2any(
-            inputs, thinker_do_sample=False, talker_do_sample=True
+            inputs,
+            thinker_do_sample=False, talker_do_sample=True,
+            max_new_tokens=min(128, max(32, len(ref_text.split()) * 4)),
+            temperature=0.0
         )
     finally:
-        if handle is not None: handle.remove()
+        if handle is not None:
+            handle.remove()
 
-    text = runner.processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    y = audio.reshape(-1).detach().cpu().numpy()
+    # Robust decode using runner helper (handles tensors / Generate outputs)
+    raw = runner.decode_text(text_ids, inputs=inputs)[0].strip()
+
+    # Extract between <say> ... </say> if model echoed tags
+    def _between(s, a="<say>", b="</say>"):
+        if a in s and b in s:
+            return s.split(a, 1)[1].split(b, 1)[0].strip()
+        return s
+    text = _between(raw)
+    
+    # Debug: print decoded text for first few examples
+    if hasattr(_gen_with_method, '_debug_count'):
+        _gen_with_method._debug_count += 1
+    else:
+        _gen_with_method._debug_count = 1
+    
+    if _gen_with_method._debug_count <= 3:
+        print(f"DECODED ({method}): {raw[:160]}")
+        print(f"CLEAN ({method}): {text}")
+        print(f"REF: {ref_text}")
+        print("---")
+
+    y = audio.reshape(-1).detach().cpu().numpy().astype("float32")
+    
+    # Save audio file for cheerful method
+    if method == "prompt_cheerful" and dialogue_id is not None and utterance_id is not None:
+        import soundfile as sf
+        audio_filename = f"outputs/cheerful_dialogue_{dialogue_id}_utterance_{utterance_id}.wav"
+        sf.write(audio_filename, y, 24000)
+        print(f"Saved cheerful audio: {audio_filename}")
+    
     return text, y
 
 def main():
@@ -91,30 +169,31 @@ def main():
     delta, nh, ns = _compute_delta_from_train(runner, n=200, layer=best_layer)
     print(f"[delta] built from {nh} happy / {ns} sad examples at layer {best_layer}")
 
-    # Pick test items with video paths
-    test = [ex for ex in load_meld(split="test", with_av=True) if ex.video_path][:args.n]
+    # Pick test items with video paths (prefer sadness for sad->happy experiment)
+    test_all = [ex for ex in load_meld(split="test", with_av=True) if ex.video_path]
+    test = [ex for ex in test_all if ex.emotion.lower() == "sadness"][:args.n] or test_all[:args.n]
     methods = ["null","prompt_cheerful","delta_random","delta_early","delta_bestlayer"]
 
     with open(args.out, "w") as fo:
         for ex in test:
-            # Baseline text (null) for affect-gain reference
-            t0, y0 = _gen_with_method(runner, ex.video_path, "null", best_layer, delta, alpha=0.0)
+            # Null baseline audio/text with FIXED transcript
+            t0, y0 = _gen_with_method(runner, ex.video_path, ex.utterance, "null", best_layer, delta, alpha=0.0, dialogue_id=ex.dialogue_id, utterance_id=ex.utterance_id)
             for method in methods:
-                for alpha in (args.alpha_grid if "delta" in method else [0.0]):  # only alpha sweep for delta methods
-                    t, y = _gen_with_method(runner, ex.video_path, method, best_layer, delta, alpha=alpha)
-                    # Metrics
-                    affect_gain = _affect_gain(runner, clf, best_layer, t0, t)
-                    content_f1  = token_overlap_f1(ex.utterance, t)
-                    len_ratio   = length_ratio(ex.utterance, t)
-                    df0         = delta_f0_mean(y0, y, sr=24000)
+                for alpha in (args.alpha_grid if "delta" in method else [0.0]):
+                    t, y = _gen_with_method(runner, ex.video_path, ex.utterance, method, best_layer, delta, alpha=alpha, dialogue_id=ex.dialogue_id, utterance_id=ex.utterance_id)
+                    affect_gain = _affect_gain_same_text(runner, clf, best_layer, ex.utterance, method, delta, alpha)
+
+                    content_f1 = token_overlap_f1(ex.utterance, t)
+                    len_ratio  = length_ratio(ex.utterance, t)
+                    df0        = delta_f0_mean(y0, y, sr=24000)
+
                     rec = {
                         "dialogue_id": ex.dialogue_id, "utterance_id": ex.utterance_id,
                         "label": ex.emotion, "method": method, "alpha": alpha,
                         "affect_gain": affect_gain, "content_f1": content_f1,
                         "length_ratio": len_ratio, "delta_f0_mean": df0
                     }
-                    fo.write(json.dumps(rec) + "\n")
-                    fo.flush()
+                    fo.write(json.dumps(rec) + "\n"); fo.flush()
                     print(rec)
 
     # Plots

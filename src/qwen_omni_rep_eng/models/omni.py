@@ -32,15 +32,19 @@ class OmniRunner:
                  device_map: str = "auto",
                  enable_audio_output: bool = True):
         self.processor = Qwen3OmniMoeProcessor.from_pretrained(model_name)
+        
+        # Choose a safe default: fp16 on CUDA, fp32 otherwise
+        _torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        
         if thinker_only:
             self.model = Qwen3OmniMoeThinkerForConditionalGeneration.from_pretrained(
-                model_name, dtype=dtype, device_map=device_map, attn_implementation="flash_attention_2"
+                model_name, torch_dtype=_torch_dtype, device_map=device_map, attn_implementation="flash_attention_2"
             ).eval()
             self.thinker = self.model
             self.talker = None
         else:
             self.model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
-                model_name, dtype=dtype, device_map=device_map, enable_audio_output=enable_audio_output, attn_implementation="flash_attention_2"
+                model_name, torch_dtype=_torch_dtype, device_map=device_map, enable_audio_output=enable_audio_output, attn_implementation="flash_attention_2"
             ).eval()
             # The combined model exposes thinker/talker submodules:
             self.thinker = getattr(self.model, "thinker", None)
@@ -65,10 +69,12 @@ class OmniRunner:
     def make_inputs(self, conversation: List[Dict[str, Any]],
                     use_audio_in_video: bool = True,
                     add_generation_prompt: bool = True,
-                    video_fps: int = 1,
+                    video_fps: int = 1,  # kept for BC
                     tokenize: bool = True,
                     return_tensors: str = "pt",
                     **proc_kwargs) -> Dict[str, torch.Tensor]:
+        # Use `fps` (not `video_fps`) and ensure padding so attention_mask is set
+        fps = proc_kwargs.pop("fps", video_fps)
         inputs = self.processor.apply_chat_template(
             conversation,
             load_audio_from_video=use_audio_in_video,
@@ -77,7 +83,8 @@ class OmniRunner:
             tokenize=tokenize,
             return_dict=True,
             return_tensors=return_tensors,
-            video_fps=video_fps,
+            fps=fps,                 # <- replaces video_fps
+            padding=True,            # <- ensures attention_mask
             **proc_kwargs
         )
         # Move to device and convert floating point tensors to model dtype
@@ -91,6 +98,41 @@ class OmniRunner:
             else:
                 result[k] = v
         return result
+
+    def decode_text(self, text_ids, inputs=None):
+        """
+        Robustly decode text from model.generate(...) for Qwen3-Omni.
+        Accepts:
+          - torch.LongTensor [B, T]
+          - GenerateDecoderOnlyOutput with .sequences
+          - list[list[int]]
+          - list[str] (already-decoded)
+        Optionally slices off the prompt using inputs["input_ids"] length.
+        """
+        # 1) Normalize to sequences (token IDs) when possible
+        seq = text_ids
+        if hasattr(seq, "sequences"):   # e.g., GenerateDecoderOnlyOutput
+            seq = seq.sequences
+
+        # 2) If it's already a list of strings, return as-is
+        if isinstance(seq, list) and len(seq) > 0 and isinstance(seq[0], str):
+            return seq
+
+        # 3) If it's a tensor/ids, optionally slice off the prompt tokens
+        if isinstance(seq, torch.Tensor):
+            if inputs is not None and "input_ids" in inputs and seq.dim() == 2:
+                start = inputs["input_ids"].shape[1]
+                seq = seq[:, start:]
+            return self.processor.batch_decode(seq, skip_special_tokens=True,
+                                               clean_up_tokenization_spaces=False)
+
+        # 4) If it's a Python list of lists of ints
+        if isinstance(seq, list) and len(seq) > 0 and isinstance(seq[0], (list, tuple)):
+            return self.processor.batch_decode(seq, skip_special_tokens=True,
+                                               clean_up_tokenization_spaces=False)
+
+        # 5) Last resort
+        return [str(seq)]
 
     # ----- Running: hidden states for Thinker -----
 
@@ -175,17 +217,41 @@ class OmniRunner:
                          inputs: Dict[str, torch.Tensor],
                          thinker_do_sample: bool = False,
                          talker_do_sample: bool = True,
-                         **gen_kwargs) -> Tuple[List[int], torch.Tensor]:
+                         **gen_kwargs) -> Tuple[List[str], torch.Tensor]:
         """
-        Joint generation: returns (text_ids, audio_waveform)
+        Joint generation: returns (decoded_text, audio_waveform)
         """
         # Filter inputs to only include tensors for generation
         gen_inputs = {k: v for k, v in inputs.items() if isinstance(v, torch.Tensor)}
-        text_ids, audio = self.model.generate(
+        outputs = self.model.generate(
             **gen_inputs,
             use_audio_in_video=True,
             thinker_do_sample=thinker_do_sample,
             talker_do_sample=talker_do_sample,
+            return_dict_in_generate=True,
+            output_scores=False,
             **gen_kwargs
         )
-        return text_ids, audio
+
+        # Text sequences - use robust decoding
+        text_ids = self.decode_text(outputs, inputs=inputs)
+
+        # Audio waveform
+        audio = None
+        for attr in ("audio", "audios", "audio_values", "waveforms"):
+            if hasattr(outputs, attr):
+                audio = getattr(outputs, attr)
+                break
+        if audio is None and isinstance(outputs, (tuple, list)) and len(outputs) > 1:
+            audio = outputs[1]
+        if audio is None:
+            raise RuntimeError("Failed to retrieve generated audio waveform.")
+
+        if isinstance(audio, torch.Tensor):
+            audio_tensor = audio
+        elif isinstance(audio, list) and audio and isinstance(audio[0], torch.Tensor):
+            audio_tensor = audio[0]
+        else:
+            raise RuntimeError("Audio waveform is not a tensor or list of tensors.")
+
+        return text_ids, audio_tensor

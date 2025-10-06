@@ -45,6 +45,6 @@ def delta_norm(x: torch.Tensor) -> torch.Tensor:
 def random_delta_like(delta_ref: torch.Tensor, seed: int = 0) -> torch.Tensor:
     """Return a random vector with the SAME norm as delta_ref (control baseline)."""
     g = torch.Generator(device=delta_ref.device).manual_seed(seed)
-    rnd = torch.randn_like(delta_ref, generator=g)
+    rnd = torch.randn(delta_ref.shape, device=delta_ref.device, dtype=delta_ref.dtype, generator=g)
     rnd = rnd / (torch.linalg.norm(rnd) + 1e-8) * (torch.linalg.norm(delta_ref) + 1e-8)
     return rnd

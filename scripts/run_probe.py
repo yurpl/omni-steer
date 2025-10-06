@@ -29,14 +29,17 @@ def main():
             feats.append(extract_token_feature(hs, layer=layer, pos=-1))
             labels.append(EMOTIONS.index(ex.emotion.lower()))
         clf, f1 = build_per_layer_probe(feats, labels)
-        tqdm.write(f"[Layer {layer:02d}] Macro-F1={f1:.3f}")
+        tqdm.write(f"[Layer {layer:02d}] Weighted-F1={f1:.3f}")
         if f1 > best[0]: best = (f1, layer, clf)
 
     f1, layer, clf = best
     print(f"BEST layer={layer} F1={f1:.3f}")
-    joblib.dump(clf, args.out_probe)
-    meta = {"best_layer": layer, "emotions": EMOTIONS, "macro_f1": f1}
+    
+    # Create outputs directory before saving files
     os.makedirs("outputs", exist_ok=True)
+    
+    joblib.dump(clf, args.out_probe)
+    meta = {"best_layer": layer, "emotions": EMOTIONS, "weighted_f1": f1}
     with open(args.out_meta, "w") as f:
         json.dump(meta, f, indent=2)
 
